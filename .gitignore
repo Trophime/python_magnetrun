@@ -10,7 +10,7 @@ __pycache__/
 
 # Distribution / packaging
 .Python
-env/
+*env/
 build/
 develop-eggs/
 dist/
@@ -111,11 +111,16 @@ log*
 python_magnetrun/_output/
 
 *.png
-python_magnetrun/*.csv
-python_magnetrun/*.txt
 python_magnetrun/data/
 python_magnetrun/txt/
 python_magnetrun/png/
+python_magnetrun/json/
 
-M*txt
-M*json
+M*.csv
+M*.txt
+M*.json
+H*.json
+M*.conf
+
+*log
+*old
