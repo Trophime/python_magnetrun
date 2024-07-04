@@ -13,33 +13,38 @@ ARG USERNAME=vscode
 ARG USER_UID=1001
 ARG USER_GID=$USER_UID
 
-# install Feelpp from BinTray Debian repository
-RUN apt update && \
-    apt install -y lsb-release && \
-    echo "deb http://archive.ubuntu.com/ubuntu $(lsb_release -cs)-proposed main restricted"  |  tee -a /etc/apt/sources.list && \
-    echo "deb http://archive.ubuntu.com/ubuntu $(lsb_release -cs)-proposed universe"  |  tee -a /etc/apt/sources.list && \
-    echo "deb http://archive.ubuntu.com/ubuntu $(lsb_release -cs)-proposed multiverse"  |  tee -a /etc/apt/sources.list && \
-    apt install -y debian-keyring && \
-    cp /usr/share/keyrings/debian-maintainers.gpg /etc/apt/trusted.gpg.d && \
-    echo "deb http://euler.GRENOBLE.LNCMI.LOCAL/~trophime/debian/ $(lsb_release -cs) main" > /etc/apt/sources.list.d/lncmi.list && \
-    apt update
-
-
 # Configure apt and install packages
-RUN apt-get update \
+RUN apt update \
+    && apt install -y lsb-release \
+    && echo "deb http://archive.ubuntu.com/ubuntu $(lsb_release -cs)-proposed main restricted"  |  tee -a /etc/apt/sources.list \
+    && echo "deb http://archive.ubuntu.com/ubuntu $(lsb_release -cs)-proposed universe"  |  tee -a /etc/apt/sources.list \
+    && echo "deb http://archive.ubuntu.com/ubuntu $(lsb_release -cs)-proposed multiverse"  |  tee -a /etc/apt/sources.list \
+    && apt update \
     && apt-get -y install --no-install-recommends apt-utils dialog 2>&1 \
     # \
     # Verify git, process tools, lsb-release (useful for CLI installs) installed\
     && apt-get -y install git iproute2 procps lsb-release \
     #\
-    # Install C++ tools\
+    # Install dev tools\
     && apt-get -y install build-essential python3-minimal libpython3.8 \
-    && apt-get -y install python3-nptdms python3-freesteam python3-nlopt python3-tabulate \
+    && apt-get -y install python3-minimal libpython3.8-dev swig \
+    && apt-get -y install python-is-python3 python3-pip python3-jinja2 \
+    && apt-get -y install python3-autopep8 black yapf3 python3-bandit flake8 pydocstyle pylint python3-pytest mypy \
+    && apt-get -y install python3-nlopt python3-tabulate \
     && apt-get -y install python3-statsmodels \
     && apt-get -y install python3-matplotlib texlive-latex-base texlive-latex-extra dvipng \
     && apt-get -y install python3-pandas python3-seaborn \
     && apt-get -y install python3-numpy python3-scipy \
-    && apt-get -y install python3-ht python3-pyclaw \
+    && apt-get -y install python3-requests python3-requests-toolbelt \
+    && apt-get -y install python3-natsort \
+    && pat-get -y install python3-myst-parser python3-sphinxcontrib-mermaid python3-sphinx-rtd-theme \
+    # \
+    # Add specific packages from lncmi debian repository \
+    && apt install -y debian-keyring \
+    && cp /usr/share/keyrings/debian-maintainers.gpg /etc/apt/trusted.gpg.d \
+    && echo "deb http://euler.lncmig.local/~christophe.trophime@LNCMIG.local/debian/ $(lsb_release -cs) main" > /etc/apt/sources.list.d/lncmi.list \
+    && apt update \
+    && apt-get -y install python3-nptdms python3-freesteam python3-ht python3-pyclaw \
     #\
     # Create a non-root user to use if preferred - see https://aka.ms/vscode-remote/containers/non-root-user.\
     && groupadd --gid $USER_GID $USERNAME \
@@ -58,6 +63,9 @@ RUN apt-get update \
     && apt-get autoremove -y \
     && apt-get clean -y \
     && rm -rf /var/lib/apt/lists/*
+
+# To be added:
+# python3-myst-parser python3-sphinxcontrib-mermaid python3-sphinx-rtd-theme
 
 # Switch back to dialog for any ad-hoc use of apt-get
 ENV DEBIAN_FRONTEND=dialog
