@@ -6,6 +6,7 @@ including data structures, configuration, and processing utilities.
 """
 
 from datetime import datetime, timedelta
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
@@ -22,6 +23,7 @@ from python_magnetrun.analysis.processing import (
     add_time_column_with_offset,
     # Utilities
     create_overview_dict,
+    process_archive_file,
     summarize_record,
 )
 
@@ -323,6 +325,62 @@ class TestCreateOverviewDict:
         assert overview_dict["test_file"]["mode"] == "Overview"
         assert overview_dict["test_file"]["t0"] == record.t0
         assert overview_dict["test_file"]["teb"] == 25.0
+
+
+class TestProcessArchiveFile:
+    """Test process_archive_file (Archive-anchored counterpart to process_overview_file)."""
+
+    @patch("python_magnetrun.magnetdata.load_magnetdata")
+    @patch("python_magnetrun.analysis.processing.FileDiscovery.discover_from_archive")
+    def test_thin_record(self, mock_discover, mock_load_magnetdata):
+        """Should discover sources via discover_from_archive and set t0/duration
+        from the archive file's own data, leaving analysis fields at defaults."""
+        mock_discover.return_value = FileSet(
+            archive=["/data/Fichiers_Archive/M9_Archive_190315-1200.tdms"],
+            pupitre=["/data/M9/2019.03.15 - 12:00:00.txt"],
+        )
+        mock_md = MagicMock()
+        mock_md.get_time_range.return_value = (
+            datetime(2019, 3, 15, 12, 0, 0),
+            datetime(2019, 3, 15, 12, 30, 0),
+        )
+        mock_md.getDuration.return_value = 1800.0
+        mock_load_magnetdata.return_value = mock_md
+
+        record = process_archive_file(
+            "/data/Fichiers_Archive/M9_Archive_190315-1200.tdms",
+            ProcessingConfig(),
+        )
+
+        assert record.filename == "M9_Archive_190315-1200"
+        assert record.housing == "M9"
+        assert record.sources.overview == []
+        assert record.sources.archive == ["/data/Fichiers_Archive/M9_Archive_190315-1200.tdms"]
+        assert record.sources.pupitre == ["/data/M9/2019.03.15 - 12:00:00.txt"]
+        assert record.t0 == datetime(2019, 3, 15, 12, 0, 0)
+        assert record.duration == 1800.0
+
+        # Thin row: no signature/sync/metrics analysis is performed.
+        assert record.signatures == {}
+        assert record.sync_info == {}
+        assert record.flow_params == {}
+        assert record.metrics == {}
+        assert record.debitbrut == {}
+
+    @patch("python_magnetrun.analysis.processing.FileDiscovery.discover_from_archive")
+    def test_dry_run_skips_data_loading(self, mock_discover):
+        """config.dry_run should skip t0/duration loading, matching process_overview_file."""
+        mock_discover.return_value = FileSet(
+            archive=["/data/Fichiers_Archive/M9_Archive_190315-1200.tdms"]
+        )
+
+        record = process_archive_file(
+            "/data/Fichiers_Archive/M9_Archive_190315-1200.tdms",
+            ProcessingConfig(dry_run=True),
+        )
+
+        assert record.t0 is None
+        assert record.duration == 0.0
 
 
 class TestIntegration:

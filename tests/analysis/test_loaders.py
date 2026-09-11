@@ -22,6 +22,7 @@ from python_magnetrun.analysis.loaders import (
     # Functions
     convert_to_timestamp,
     find_files,
+    find_files_from_archive,
     merge_data,
 )
 
@@ -303,6 +304,48 @@ class TestFindFiles:
         assert "Fichiers_Spike" in spike
 
 
+class TestFindFilesFromArchive:
+    """Test find_files_from_archive function."""
+
+    def test_returns_four_patterns(self):
+        """find_files_from_archive should return 4 glob patterns (no archive_filter)."""
+        patterns = find_files_from_archive(
+            "/data/Fichiers_Archive/M9_Archive_190315-1200.tdms",
+            "M9",
+            "190315",
+            "1200",
+            pupitre_datadir="/pupitre",
+        )
+        assert len(patterns) == 4
+
+    def test_pupitre_pattern(self):
+        """Pupitre pattern should use correct date format."""
+        pupitre, *_ = find_files_from_archive(
+            "/data/Fichiers_Archive/M9_Archive_190315-1200.tdms",
+            "M9",
+            "190315",
+            "1200",
+            pupitre_datadir="/pupitre",
+        )
+        # Pattern should be: /pupitre/M9/2019.03.15*.txt
+        assert "M9" in pupitre
+        assert "2019.03.15" in pupitre
+        assert "*.txt" in pupitre
+
+    def test_incident_patterns(self):
+        """Incident patterns should use correct directories, derived from Fichiers_Archive."""
+        _, default, trigger, spike = find_files_from_archive(
+            "/data/Fichiers_Archive/M9_Archive_190315-1200.tdms",
+            "M9",
+            "190315",
+            "1200",
+        )
+        assert "Fichiers_Default" in default
+        assert "M9_Default_190315" in default
+        assert "Fichiers_Manuel_Trig" in trigger
+        assert "Fichiers_Spike" in spike
+
+
 class TestMergeData:
     """Test merge_data function."""
 
@@ -374,3 +417,23 @@ class TestIntegration:
         # Should return FileSet with overview
         assert len(fs.overview) == 1
         assert fs.overview[0] == "/data/Overview/M9_Overview_241106-1643.tdms"
+
+    @patch("python_magnetrun.analysis.loaders.glob.glob")
+    @patch("python_magnetrun.analysis.loaders.extract_data")
+    def test_archive_discovery_workflow(self, mock_extract, mock_glob):
+        """Test complete Archive-anchored discovery workflow with mocks."""
+        mock_extract.return_value = (
+            "2019-03-15 12:00:00",
+            "2019-03-15 13:00:00",
+            False,
+        )
+        mock_glob.return_value = []  # No files found
+
+        fd = FileDiscovery(pupitre_datadir="/data")
+        fs = fd.discover_from_archive(
+            "/data/Fichiers_Archive/M9_Archive_190315-1200.tdms"
+        )
+
+        # Should return FileSet with archive set and overview left empty
+        assert fs.archive == ["/data/Fichiers_Archive/M9_Archive_190315-1200.tdms"]
+        assert fs.overview == []

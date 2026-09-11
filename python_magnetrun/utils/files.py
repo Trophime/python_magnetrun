@@ -488,6 +488,74 @@ def find_files(
     )
 
 
+def find_files_from_archive(
+    archive_file: str,
+    housing: str,
+    date: str,
+    time: str,
+    pupitre_datadir: str | Path = ".",
+) -> tuple[str, str, str, str]:
+    """Build glob patterns to find files related to an Archive file.
+
+    Counterpart to :func:`find_files` for sessions with no Overview TDMS
+    capture (e.g. M9 before 2019): the Archive file itself is the anchor,
+    so no ``archive_filter`` is returned — the anchor is used directly.
+
+    Parameters
+    ----------
+    archive_file : str
+        Path to the archive TDMS file (the anchor)
+    housing : str
+        Housing identifier (M8, M9, M10)
+    date : str
+        Date string from filename (e.g., "190315")
+    time : str
+        Time string from filename (e.g., "1200")
+    pupitre_datadir : str or Path, optional
+        Base directory for pupitre files
+
+    Returns
+    -------
+    tuple[str, str, str, str]
+        (pupitre_filter, default_filter, trigger_filter, spike_filter)
+        Each is a glob pattern for finding related files.
+    """
+    logger.info(
+        f"find_files_from_archive: archive_file={archive_file}, housing={housing}, "
+        f"date={date}, time={time}"
+    )
+    pupitre_datadir = Path(pupitre_datadir)
+
+    pupitre_site_dir = pupitre_datadir / housing
+    pupitre_filter = str(
+        pupitre_site_dir / f"20{date[0:2]}.{date[2:4]}.{date[4:]}*.txt"
+    )
+
+    extension = os.path.splitext(archive_file)[-1]
+    filename = os.path.basename(archive_file).replace(extension, "")
+    archive_dir = os.path.dirname(archive_file)
+
+    default_datadir = archive_dir.replace(DIR_ARCHIVE, DIR_DEFAULT)
+    trigger_datadir = archive_dir.replace(DIR_ARCHIVE, DIR_TRIGGER)
+    spike_datadir = archive_dir.replace(DIR_ARCHIVE, DIR_SPIKE)
+
+    default_name = filename.replace("Archive", "Default")
+    default_filter = f"{default_datadir}/{default_name.replace(time, '*.tdms')}"
+
+    trigger_name = filename.replace("Archive", "ManuelTrig")
+    trigger_filter = f"{trigger_datadir}/{trigger_name.replace(time, '*.tdms')}"
+
+    spike_name = filename.replace("Archive", "Spikes")
+    spike_filter = f"{spike_datadir}/{spike_name.replace(time, '*.tdms')}"
+
+    return (
+        pupitre_filter,
+        default_filter,
+        trigger_filter,
+        spike_filter,
+    )
+
+
 # =============================================================================
 # Select files function
 # =============================================================================

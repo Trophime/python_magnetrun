@@ -1032,6 +1032,93 @@ def process_overview_file(
     return record
 
 
+def process_archive_file(
+    archive_file: str,
+    config: ProcessingConfig,
+    housing_config: HousingConfig | None = None,
+    dry_run: bool = False,
+) -> OverviewRecord:
+    """Process a single archive file for sessions with no Overview TDMS capture.
+
+    Counterpart to :func:`process_overview_file` for pre-Overview-coverage
+    sessions (e.g. M9 before 2019). Discovers pupitre/default/trigger/spike
+    files around the archive file's own time window and sets ``t0``/``duration``
+    directly from the archive file's own data, since Archive TDMS files carry
+    no ``Infos`` group. Unlike :func:`process_overview_file`, no signatures,
+    synchronization, or metrics are computed — those fields are left at their
+    :class:`OverviewRecord` defaults, and ``sources.overview`` stays empty
+    (that emptiness is what distinguishes these rows once written to
+    ``overview_records``).
+
+    Parameters
+    ----------
+    archive_file : str
+        Path to archive TDMS file
+    config : ProcessingConfig
+        Processing configuration
+    housing_config : HousingConfig, optional
+        Housing-specific configuration (auto-detected if not provided)
+    dry_run : bool, optional
+        When True skip full file loads (timestamps from filename only)
+
+    Returns
+    -------
+    OverviewRecord
+        Record with sources discovered and t0/duration set; analysis
+        fields (signatures, sync_info, flow_params, metrics, debitbrut,
+        teb, BP) left at their defaults.
+    """
+    basename = os.path.basename(archive_file)
+    filename = basename.replace(".tdms", "")
+    parts = filename.split("_")
+    housing = parts[0]
+    mode = parts[1] if len(parts) > 1 else "Archive"
+    logger.info(
+        f"Processing {filename} (housing={housing}, mode={mode}), config={config}"
+    )
+
+    if housing_config is None:
+        if housing not in HOUSING_CONFIGS:
+            raise ValueError(
+                f"Unknown housing: {housing}. Available: {list(HOUSING_CONFIGS.keys())}"
+            )
+        housing_config = HOUSING_CONFIGS[housing]
+
+    record = OverviewRecord(filename=filename, housing=housing, mode=mode)
+
+    discovery = FileDiscovery(
+        pupitre_datadir=config.pupitre_datadir,
+        pigbrother_datadir=config.pigbrother_datadir,
+        pigbrother_runlog_dir=os.path.dirname(archive_file) or None,
+        hybrid_datadir=config.hybrid_datadir if housing == "M8" else None,
+    )
+    record.sources = discovery.discover_from_archive(
+        archive_file, housing=housing, dry_run=dry_run
+    )
+    logger.info(
+        f"Discovered: pupitre={len(record.sources.pupitre)}, "
+        f"incidents={len(record.sources.default) + len(record.sources.trigger) + len(record.sources.spike)}, "
+        f"hybrid_kHz={len(record.sources.hybrid_kHz)}, "
+        f"hybrid_rms={len(record.sources.hybrid_rms)}, "
+        f"hybrid_vprocess={len(record.sources.hybrid_vprocess)}, "
+        f"hybrid_trigger={len(record.sources.hybrid_trigger)}"
+    )
+
+    if config.dry_run:
+        logger.info("Dry run — skipping data loading")
+        return record
+
+    from ..magnetdata import load_magnetdata
+
+    md = load_magnetdata(archive_file)
+    record.t0, _ = md.get_time_range()
+    record.duration = md.getDuration()
+    logger.info(f"{archive_file}: t0={record.t0}, duration={record.duration}s")
+
+    logger.info(f"Processing complete for {filename}")
+    return record
+
+
 def process_experiment(
     overview_files: list[str],
     config: ProcessingConfig,

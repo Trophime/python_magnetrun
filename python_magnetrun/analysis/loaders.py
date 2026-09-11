@@ -43,9 +43,11 @@ from natsort import natsorted
 from ..magnetdata_base import DataType
 from ..runlogs.pigbrother import PIGBROTHER_LOG_FILENAME
 from ..utils.files import (
+    DIR_ARCHIVE,
     TIMESTAMP_FORMAT,
     extract_data,
     find_files,
+    find_files_from_archive,
     select_files,
 )
 from .config import (
@@ -539,6 +541,40 @@ class FileDiscovery:
                     overview_dir = ""
         return resolved_overview, overview_dir
 
+    def _resolve_archive_path(
+        self,
+        archive_file: str,
+        housing: str | None,
+        filename: str,
+        basename: str,
+    ) -> tuple[str, str]:
+        """Resolve a bare filename to a full path under pigbrother_datadir.
+
+        Counterpart to :meth:`_resolve_overview_path` for Archive-anchored
+        discovery. Returns (resolved_archive, archive_dir). When
+        *archive_file* already contains a directory component both values
+        are returned unchanged.
+        """
+        archive_dir = os.path.dirname(archive_file)
+        resolved_archive = archive_file
+        if not archive_dir:
+            logger.debug("No directory in archive_file, attempting to resolve...")
+            parts_tmp = filename.split("_")
+            if parts_tmp:
+                file_housing_tmp = housing if housing else parts_tmp[0]
+                candidate_dir = self.pigbrother_datadir / file_housing_tmp / DIR_ARCHIVE
+                candidate_path = candidate_dir / basename
+                logger.debug(f"candidate_path={candidate_path}")
+                if candidate_path.exists():
+                    resolved_archive = str(candidate_path)
+                    archive_dir = str(candidate_dir)
+                    logger.debug(
+                        f"Resolved archive {archive_file} -> {resolved_archive}"
+                    )
+                else:
+                    archive_dir = ""
+        return resolved_archive, archive_dir
+
     def _parse_overview_filename(
         self,
         filename: str,
@@ -607,6 +643,52 @@ class FileDiscovery:
         )
         logger.info(
             f"Selected: pupitre={file_set.pupitre} archive={file_set.archive} "
+            f"default={file_set.default} trigger={file_set.trigger} spike={file_set.spike}"
+        )
+        return file_set
+
+    def _select_related_files_from_archive(
+        self,
+        archive_path: str,
+        housing: str,
+        date: str,
+        time: str,
+        start: str,
+        end: str,
+    ) -> FileSet:
+        """Glob and time-filter all file types related to *archive_path*.
+
+        Counterpart to :meth:`_select_related_files` for Archive-anchored
+        discovery. Returns a :class:`FileSet` with ``archive`` left empty
+        (the caller fills it with the anchor after resolving the path).
+        """
+        filters = find_files_from_archive(
+            archive_path,
+            housing,
+            date,
+            time,
+            pupitre_datadir=self.pupitre_datadir,
+        )
+        pupitre_f, default_f, trigger_f, spike_f = filters
+        logger.info(
+            f"File patterns: pupitre={pupitre_f} "
+            f"default={default_f} trigger={trigger_f} spike={spike_f}"
+        )
+
+        file_set = FileSet()
+        file_set.pupitre = select_files(glob.glob(pupitre_f), housing, start, end)
+        # Incident files are intentionally short; disable the min-duration guard.
+        file_set.default = select_files(
+            glob.glob(default_f), housing, start, end, min_duration_seconds=0.0
+        )
+        file_set.trigger = select_files(
+            glob.glob(trigger_f), housing, start, end, min_duration_seconds=0.0
+        )
+        file_set.spike = select_files(
+            glob.glob(spike_f), housing, start, end, min_duration_seconds=0.0
+        )
+        logger.info(
+            f"Selected: pupitre={file_set.pupitre} "
             f"default={file_set.default} trigger={file_set.trigger} spike={file_set.spike}"
         )
         return file_set
@@ -811,6 +893,82 @@ class FileDiscovery:
 
         logger.info(
             f"Discovered files for {filename}: {len(file_set.archive)} archives, "
+            f"{len(file_set.pupitre)} pupitres, "
+            f"{len(file_set.default) + len(file_set.trigger) + len(file_set.spike)} incidents, "
+            f"{len(file_set.pigbrother_runlog)} pigbrother runlog, "
+            f"{len(file_set.pupitre_runlog)} pupitre runlog, "
+            f"{len(file_set.hybrid_kHz)} kHz, "
+            f"{len(file_set.hybrid_rms)} rms, "
+            f"{len(file_set.hybrid_trigger)} trigger dirs, "
+            f"{len(file_set.hybrid_vprocess)} vprocess"
+        )
+        return file_set
+
+    def discover_from_archive(
+        self,
+        archive_file: str,
+        housing: str | None = None,
+        dry_run: bool = False,
+    ) -> FileSet:
+        """Discover all files related to an Archive file, with no Overview anchor.
+
+        Counterpart to :meth:`discover` for sessions with no TDMS Overview
+        capture (e.g. M9 before 2019). The Archive file becomes the anchor:
+        the returned :class:`FileSet` has ``archive`` set to the resolved
+        anchor path and ``overview`` left empty — that emptiness is the
+        signal distinguishing these sessions from genuine Overview captures.
+
+        Parameters
+        ----------
+        archive_file : str
+            Path to the archive TDMS file
+        housing : str, optional
+            Housing identifier (extracted from filename if not provided)
+        dry_run : bool, optional
+            When True skip full file loads (timestamps from filename only)
+
+        Returns
+        -------
+        FileSet
+            Container with all discovered related files
+        """
+        logger.info(f"Discovering files for archive: {archive_file}, housing={housing}")
+
+        extension = os.path.splitext(archive_file)[-1]
+        basename = os.path.basename(archive_file)
+        filename = basename.replace(extension, "")
+        logger.info(f"discover archive file: {archive_file} (filename={filename})")
+
+        resolved_archive, archive_dir = self._resolve_archive_path(
+            archive_file, housing, filename, basename
+        )
+        logger.info(f"discover archive_dir={archive_dir}, resolved_archive={resolved_archive}")
+
+        parsed = self._parse_overview_filename(filename, housing)
+        if parsed is None:
+            return FileSet(archive=[f"{archive_dir}/{archive_file}"])
+        housing, date, time = parsed
+        logger.info(f"Extracted date={date}, time={time} from filename")
+
+        start, end, skip = extract_data(
+            resolved_archive, housing, assembly="", key=None, dry_run=dry_run
+        )
+        logger.info(f"Archive file time range: start={start}, end={end}, skip={skip}")
+
+        if skip or not start or not end:
+            logger.warning(f"Could not extract time range from {archive_file}")
+            return FileSet(archive=[resolved_archive])
+
+        file_set = self._select_related_files_from_archive(
+            resolved_archive, housing, date, time, start, end
+        )
+        file_set.archive = [resolved_archive]
+
+        self._discover_runlogs(file_set, start, end)
+        self._discover_hybrid_data(file_set, housing, filename, resolved_archive, start, end)
+
+        logger.info(
+            f"Discovered files for {filename}: "
             f"{len(file_set.pupitre)} pupitres, "
             f"{len(file_set.default) + len(file_set.trigger) + len(file_set.spike)} incidents, "
             f"{len(file_set.pigbrother_runlog)} pigbrother runlog, "
